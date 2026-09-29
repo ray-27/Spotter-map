@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Fuel Route Planner</title>
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; display: flex; height: 100vh; }
+    #panel { width: 360px; padding: 16px; overflow-y: auto; box-sizing: border-box; border-right: 1px solid #ddd; }
+    #map { flex: 1; }
+    input { width: 100%; padding: 8px; margin: 4px 0 10px; box-sizing: border-box; }
+    button { width: 100%; padding: 10px; background: #1a73e8; color: #fff; border: 0; border-radius: 4px; cursor: pointer; }
+    .summary { background: #f3f6fb; padding: 10px; border-radius: 4px; margin: 14px 0; }
+    .stop { border-bottom: 1px solid #eee; padding: 8px 0; font-size: 14px; }
+    .error { color: #c62828; margin-top: 12px; }
+  </style>
+</head>
+<body>
+<div id="panel">
+  <h2>Fuel Route Planner</h2>
+  <form id="form">
+    <label>Start <input name="start" placeholder="Chicago, IL" required></label>
+    <label>Finish <input name="finish" placeholder="Houston, TX" required></label>
+    <button type="submit">Plan route</button>
+  </form>
+  <div id="result"></div>
+</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const map = L.map("map").setView([39.5, -98.35], 4);
+  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap contributors",
+  }).addTo(map);
+  const layer = L.layerGroup().addTo(map);
+  const form = document.getElementById("form");
+  const result = document.getElementById("result");
+  const money = (n) => "$" + n.toFixed(2);
+
+  async function plan(start, finish) {
+    result.innerHTML = "Planning…";
+    layer.clearLayers();
+    const params = new URLSearchParams({ start, finish });
+    history.replaceState(null, "", "?" + params);
+    const resp = await fetch("{% url 'route-plan' %}?" + params);
+    const data = await resp.json();
+    if (!resp.ok) { result.innerHTML = `<div class="error">${data.error}</div>`; return; }
+
+    const line = L.geoJSON(data.route, { style: { color: "#1a73e8", weight: 5 } }).addTo(layer);
+    L.marker([data.start.lat, data.start.lon]).bindPopup("Start: " + data.start.name).addTo(layer);
+    L.marker([data.finish.lat, data.finish.lon]).bindPopup("Finish: " + data.finish.name).addTo(layer);
+    data.fuel_stops.forEach((s, i) => {
+      L.circleMarker([s.lat, s.lon], { radius: 9, color: "#fff", fillColor: "#e53935", fillOpacity: 1, weight: 2 })
+        .bindPopup(`<b>Stop ${i + 1}: ${s.name}</b><br>${s.address}, ${s.city}, ${s.state}<br>
+                    $${s.price_per_gallon.toFixed(3)}/gal · ${s.gallons} gal · ${money(s.cost)}`)
+        .addTo(layer);
+    });
+    map.fitBounds(line.getBounds(), { padding: [30, 30] });
+
+    result.innerHTML = `
+      <div class="summary">
+        <b>${data.distance_miles} miles</b> · ${data.duration_hours} h driving<br>
+        Fuel: ${data.total_gallons} gal · <b>${money(data.total_fuel_cost)}</b><br>
+        <small>${data.vehicle.range_miles} mi range, ${data.vehicle.mpg} mpg</small>
+      </div>
+      ${data.fuel_stops.map((s, i) => `
+        <div class="stop"><b>${i + 1}. ${s.name}</b> — mile ${s.mile_marker}<br>
+          ${s.city}, ${s.state} · $${s.price_per_gallon.toFixed(3)}/gal<br>
+          ${s.gallons} gal → ${money(s.cost)}</div>`).join("")}`;
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    plan(form.start.value, form.finish.value);
+  });
+
+  const initial = new URLSearchParams(location.search);
+  if (initial.get("start") && initial.get("finish")) {
+    form.start.value = initial.get("start");
+    form.finish.value = initial.get("finish");
+    plan(form.start.value, form.finish.value);
+  }
+</script>
+</body>
+</html>
