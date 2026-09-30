@@ -5,7 +5,11 @@ cost-effective fuel stops along the way (500-mile range), and the total fuel cos
 
 ## Run
 
+Build the US city list first. Docker does not do this. `scripts/build_places.py` downloads nothing itself; it reads the GeoNames US dump and writes `data/us_places.csv.gz`, which `docker compose` then loads into the database.
+
 ```bash
+curl -O https://download.geonames.org/export/dump/US.zip && unzip US.zip
+python scripts/build_places.py US.txt
 docker compose up --build
 ```
 
